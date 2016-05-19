@@ -3,6 +3,8 @@
 namespace app\models;
 
 use Yii;
+use yii\db\ActiveRecord;
+use yii\web\IdentityInterface;
 
 /**
  * This is the model class for table "user".
@@ -16,8 +18,11 @@ use Yii;
  * @property string $access_token
  * @property string $create_date
  */
-class User extends \yii\db\ActiveRecord
+class User extends ActiveRecord implements IdentityInterface
 {
+    const MAX_LOGIN = 128;
+    const MIN_PASSWORD = 6;
+    const MAX_NAME_ANDSURNAME = 45;
     /**
      * @inheritdoc
      */
@@ -32,11 +37,11 @@ class User extends \yii\db\ActiveRecord
     public function rules()
     {
         return [
-            [['username', 'password', 'salt', 'access_token'], 'required'],
-            [['create_date'], 'safe'],
-            [['username'], 'string', 'max' => 128],
-            [['name', 'surname'], 'string', 'max' => 45],
-            [['password', 'salt', 'access_token'], 'string', 'max' => 255],
+            [['username', 'password'], 'required'],
+            [['username'], 'string', 'max' => self::MAX_LOGIN],
+            [['password'],'string','min' => self::MIN_PASSWORD],
+            [['name', 'surname'], 'string', 'max' => self::MAX_NAME_ANDSURNAME],
+            
         ];
     }
 
@@ -47,13 +52,12 @@ class User extends \yii\db\ActiveRecord
     {
         return [
             'id' => Yii::t('app', 'ID'),
-            'username' => Yii::t('app', 'Username'),
-            'name' => Yii::t('app', 'Name'),
-            'surname' => Yii::t('app', 'Surname'),
-            'password' => Yii::t('app', 'Password'),
-            'salt' => Yii::t('app', 'Salt'),
-            'access_token' => Yii::t('app', 'Access Token'),
-            'create_date' => Yii::t('app', 'Create Date'),
+            'username' => Yii::t('app', 'Login'),
+            'name' => Yii::t('app', 'Имя'),
+            'surname' => Yii::t('app', 'Фамилия'),
+            'password' => Yii::t('app', 'Пароль')
+            
+            
         ];
     }
 
@@ -64,5 +68,72 @@ class User extends \yii\db\ActiveRecord
     public static function find()
     {
         return new \app\models\query\UserQuery(get_called_class());
+    }
+    /*Реализация IdentytiInterface*/
+    public static function findIdentity($id) {
+        return static::findOne(['id'=>$id]);
+    }
+    
+    public static function findIdentityByAccessToken($token, $type = null) {
+        return static::findOne(["access_token"=>$token]);
+    }
+    
+    public function getId() {
+        return $this->id;
+    }
+    
+    public function getAuthKey() {
+        return $this->access_token;
+    }
+    
+    public function validateAuthKey($authKey) {
+        return $this->getAuthKey()==$authKey;
+    }
+    /*IdentityInterface реализован*/
+    // Создает последовательность символов добавляемую  к паролю
+    public function saltGenerator(){
+        return hash("sha512", uniqid('salt_', true));
+    }
+    //Добавляет последовательность символов созданную saltGenerator к паролю
+    public function passwordWithSalt($password, $salt){
+        return hash("sha512", $password.$salt);
+    }
+    //генерируем access_token
+    public function generateAccessToken(){
+        $this->access_token=Yii::$app->security->generateRandomString();
+    }
+    //Пароль с шифрованием
+    public function setPassword($password){
+        $this->password = $this->passwordWithSalt($password, $this->saltGenerator());
+    }
+     //Проверка пароля
+    public function validatePassword($password){
+       return $this->password===$this->passwordWithSalt($password, $this->salt);
+    }
+    
+    public static function findByUsername ($username)
+    {
+        return static::findOne(['username' => $username]);
+    }
+    //Перед добавлением записи в БД Кодируем пароль
+    
+    public function beforeSave($insert) {
+        if(parent::beforeSave($insert))
+        {
+            if ($this->getIsNewRecord() && !empty($this->password)){
+                $this->salt = $this->saltGenerator(); 
+            }
+            if (!empty($this->password)){
+                $this->password=  $this->passwordWithSalt($this->password, $this->salt);
+            }
+            else{
+                unset($this->password);
+            }
+            return true;
+        }
+        else
+        {
+            return false;
+        }
     }
 }
